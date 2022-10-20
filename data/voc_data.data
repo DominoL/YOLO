@@ -1,0 +1,4 @@
+classes=20
+train=.\data\voc_train_data.txt
+valid=.\data\voc_val_data.txt
+names=.\data\voc_classes.names
