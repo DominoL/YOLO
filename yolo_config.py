@@ -1,19 +1,25 @@
 from utils.utils import get_anchors, get_classes
 
 
-class Config():
-    def __init__(self):
+class YoloConfig():
+    def __init__(self, version):
         # 训练相关
         #---------------------------------------------------------------------#
         #   输入图片的大小，必须为32的倍数。
         #---------------------------------------------------------------------#
         self.input_shape        = [416, 416]
-        self.backbone_path      = '.\\weights\\darknet53_backbone_weights.pth'
-        self.model_path         = '.\\weights\\yolo_weights.pth'
-        self.anchors_path       = '.\\data\\yolo_anchors.txt'
+        self.version            = version
+        if version == 'v3':
+            self.backbone_path      = '.\\weights\\v3\\darknet53_backbone_weights.pth'
+            self.model_path         = '.\\weights\\v3\\yolo3_weights.pth'
+            self.anchors_path       = '.\\data\\yolov3_anchors.txt'
+        if version == 'v4':
+            self.backbone_path      = '.\\weights\\v4\\CSPdarknet53_backbone_weights.pth'
+            self.model_path         = '.\\weights\\v4\\yolo4_weights.pth'
+            self.anchors_path       = '.\\data\\yolov4_anchors.txt'
+
         self.anchors_mask       = [[6, 7, 8], [3, 4, 5], [0, 1, 2]]
         self.classes_path       = '.\\data\\voc_classes.names'
-
         self.anchors, self.num_anchors     = get_anchors(self.anchors_path)
         self.class_names, self.num_classes = get_classes(self.classes_path)
         #------------------------------------------------------------------#

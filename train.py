@@ -5,24 +5,21 @@ import numpy as np
 import torch
 import torch.optim as optim
 from callbacks import EvalCallback, History
-from config import Config
-from dataloader import DataTransform, YoloDataset, yolo_dataset_collate
-from nets.losses import YoloLoss
-from nets.yolo import Yolo3
+from yolo_config import YoloConfig
+from dataloader import DataTransform, YoloDataset
+
 from torch import distributed as dist
 from torch import nn
 from torch.cuda import amp
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
-from utils.utils import (get_lr_scheduler, get_optimizer_lr, set_optimizer_lr,
-                         weights_init)
+from utils.utils import (get_lr_scheduler, get_optimizer_lr, set_optimizer_lr, weights_init)
 from utils.utils_bbox import non_max_suppression
 
-cfg = Config()
 
 class Trainer():
-    def __init__(self, gpu, fp16, pretrained, distributed=False, Freeze_Train=True):
+    def __init__(self, cfg, fp16, distributed=False, Freeze_Train=True, gpu=0):
         # 训练相关
         self.scaler    = None
         self.optimizer = None
@@ -30,7 +27,6 @@ class Trainer():
         self.gpu       = gpu
         self.fp16      = fp16
         self.distributed = distributed    # 多卡平行运行
-        self.pretrained  = pretrained
         self.model_path  = cfg.model_path
 
         self.num_classes = cfg.num_classes
@@ -64,11 +60,20 @@ class Trainer():
         self.train_data_loader = self.get_loader("train", batch_size, shuffle=True, num_workers=4)
         self.val_data_loader = self.get_loader("val", batch_size, shuffle=False, num_workers=4)
         self.set_device()
+
+        if cfg.verion == 'v3':
+            from yolov3.model import YoloBody
+            from yolov3.loss import YoloLoss
+        elif cfg.verion == 'v4':
+            from yolov4.model import YoloBody
+            from yolov4.loss import YoloLoss
+
+        self.model = YoloBody(cfg.anchors_mask, cfg.num_classes, cfg.backbone_path, cfg.pretrained, phase='train')
+        self.loss = YoloLoss(cfg.anchors, cfg.num_classes, cfg.input_shape, self.device, cfg.anchors_mask)
         self.set_model()
         self.scaler = torch.cuda.amp.GradScaler() if self.fp16 else None
         self.set_optimizer(Init_lr_fit)
         self.lr_scheduler = self.get_scheduler(batch_size)
-        self.loss = YoloLoss(cfg.anchors, cfg.num_classes, cfg.input_shape, self.device, cfg.anchors_mask)
         self.history = History(cfg.save_logs, self.model, cfg.input_shape)
         self.eval_callback = EvalCallback(cfg.save_logs, cfg.class_names, cfg.input_shape, cfg.iou_threshold)
 
@@ -221,8 +226,7 @@ class Trainer():
         #------------------------------------------------------#
         #   创建yolo模型
         #------------------------------------------------------#
-        self.model = Yolo3(cfg.num_classes, cfg.input_shape, cfg.anchors, cfg.anchors_mask, self.pretrained, phase='train')
-        if not self.pretrained:
+        if not self.model.pretrained:
             weights_init(self.model)
         else:
             if self.model_path != '':
@@ -398,9 +402,12 @@ class Trainer():
 
 
 if __name__ == "__main__":
+    cfg = YoloConfig(version='v4')
+
+    YOLO_trainer = Trainer(cfg, fp16=True, distributed=False, Freeze_Train=True)
     print("[%s] Start train ..." % (time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())))
 
-    Trainer(gpu=0, fp16=True, pretrained=True, distributed=False, Freeze_Train=True).train()
+    YOLO_trainer.train()
 
     print("[%s] End train ..." % (time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())))
 

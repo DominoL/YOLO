@@ -77,10 +77,12 @@ class YoloLoss():
         # class label smoothing https://arxiv.org/pdf/1902.04103.pdf eqn 3
         self.cp, self.cn = smooth_BCE(eps=label_smoothing)
 
+        self.device = device
+
         # Define criteria
-        self.BCEcls = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([cls_pw], device=device),
+        self.BCEcls = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([cls_pw], device=self.device),
                                            reduction='mean')
-        self.BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([obj_pw], device=device),
+        self.BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([obj_pw], device=self.device),
                                            reduction='mean')
         # focal loss
         if focal_loss:
@@ -90,13 +92,11 @@ class YoloLoss():
         self.iou_type = iou_type
 
         self.target_threshold = target_threshold
-        self.device = device
 
     def __call__(self, ps, targets=None):
         cls_loss = torch.zeros(1, device=self.device)  # class loss: Tensor(0)
         box_loss = torch.zeros(1, device=self.device)  # box loss: Tensor(0)
         obj_loss = torch.zeros(1, device=self.device)  # object loss: Tensor(0)
-        metrics = {}
         # Losses
         for l, p in enumerate(ps):  # layer index, layer predictions
             # l 代表使用的是第几个有效特征层
@@ -156,41 +156,10 @@ class YoloLoss():
 
             obj_loss += self.balance[l] * self.BCEobj(pb[..., 4], t_obj)  # obj loss
 
-            #----------------------------------------------------------#
-            #  评估指标
-            #----------------------------------------------------------#
-            # 类别掩膜，类别预测正确即为1，默认全为0
-            class_mask = torch.zeros_like(p[..., 0], device=self.device)
-            # obj，anchor包含物体, 即为1，默认为0 考虑前景
-            obj_mask = torch.zeros_like(p[..., 0], device=self.device)
-            if n: 
-                # 对应匹配到正样本的预测信息
-                pb = p[b, a, gj, gi]  # target-subset of predictions
-                obj_mask[b, a, gj, gi] = 1 # 实际包含物体的设置成1
-            # Compute label correctness and iou at best anchor 计算预测的和真实的类别是一样的索引
-            class_mask[b, a, gj, gi] = (pb[:, 5:].argmax(-1) == t_cls).float()
-            # Metrics
-            cls_acc = 100 * class_mask.mean()
-            conf50 = (torch.sigmoid(pb[..., 4]) > 0.5).float()
-            iou50 = (t_obj > 0.5).float()
-            iou75 = (t_obj > 0.75).float()
-            detected_mask = conf50 * class_mask * obj_mask # 是否包含物体且所属类别都预测正确
-            precision = torch.sum(iou50 * detected_mask) / (conf50.sum() + 1e-16)
-            recall50 = torch.sum(iou50 * detected_mask) / (obj_mask.sum() + 1e-16)
-            recall75 = torch.sum(iou75 * detected_mask) / (obj_mask.sum() + 1e-16)
-
-            metrics['yolo_head_' + str(l)] = {
-                "cls_acc": cls_acc.detach().cpu().item(),
-                "recall50": recall50.detach().cpu().item(),
-                "recall75": recall75.detach().cpu().item(),
-                "precision": precision.detach().cpu().item()
-
-            }
-
         loss = sum([self.box_ratio * box_loss, 
                     self.obj_ratio * obj_loss,
                     self.cls_ratio * cls_loss])
-        return loss, metrics
+        return loss
 
     def targets_match(self, p, anchors, targets):
         #-----------------------------------------------#

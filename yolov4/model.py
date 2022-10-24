@@ -96,7 +96,7 @@ def yolo_head(filters_list, in_filters):
 #   yolo_body
 #---------------------------------------------------#
 class YoloBody(nn.Module):
-    def __init__(self, anchors_mask, num_classes,  pretrained=True, phase='inference'):
+    def __init__(self, anchors_mask, num_classes, backbone_path, pretrained=True, phase='inference'):
         super(YoloBody, self).__init__()
         #---------------------------------------------------#   
         #   生成CSPdarknet53的主干模型
@@ -105,7 +105,8 @@ class YoloBody(nn.Module):
         #   26,26,512
         #   13,13,1024
         #---------------------------------------------------#
-        self.backbone = CSPdarknet53(pretrained)
+        self.pretrained = pretrained
+        self.backbone = CSPdarknet53(self.pretrained, backbone_path)
 
         self.conv_set1 = make_three_conv([512, 1024], 1024)
         self.SPP = SpatialPyramidPooling()

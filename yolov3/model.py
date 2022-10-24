@@ -2,12 +2,12 @@ from collections import OrderedDict
 
 import torch
 import torch.nn as nn
-from nets.darknet import darknet53
+from yolov3.darknet import darknet53
 
 
-class Yolo3(nn.Module):
+class YoloBody(nn.Module):
     def __init__(self, num_classes, input_shape, anchors, anchors_mask=[[6,7,8], [3,4,5], [0,1,2]], pretrained=True):
-        super(Yolo3, self).__init__()
+        super(YoloBody, self).__init__()
         #---------------------------------------------------#   
         #   生成darknet53的主干模型
         #   获得三个有效特征层，他们的shape分别是：
@@ -15,7 +15,8 @@ class Yolo3(nn.Module):
         #   26,26,512
         #   13,13,1024
         #---------------------------------------------------#
-        self.backbone = darknet53(pretrained)
+        self.pretrained = pretrained
+        self.backbone = darknet53(self.pretrained)
 
         #---------------------------------------------------#
         #   out_filters : [64, 128, 256, 512, 1024]
