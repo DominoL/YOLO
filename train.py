@@ -191,7 +191,7 @@ class Trainer():
                                  shuffle=shuffle,
                                  pin_memory=True,
                                  drop_last=True, 
-                                 collate_fn=yolo_dataset_collate, 
+                                 collate_fn=dataset.collate_fn, 
                                  sampler=self.sampler)
 
         return data_loader
