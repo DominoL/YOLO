@@ -119,3 +119,5 @@ class YoloConfig():
         #   在多次测试后，发现关闭letterbox_image直接resize的效果更好
         #---------------------------------------------------------------------#
         self.letterbox_image = False
+
+        self.multiscale = False
