@@ -9,12 +9,12 @@ from tqdm import tqdm
 from utils.utils_bbox import non_max_suppression, yolo_correct_boxes
 
 matplotlib.use('Agg')
-from config import Config
+from yolo_config import YoloConfig
 from matplotlib import pyplot as plt
 from utils.utils import cvtColor, preprocess_input, resize_image
 from utils.utils_map import get_coco_map, get_map
 
-cfg = Config()
+cfg = YoloConfig()
 
 class Evaluater():
     def __init__(self, log_dir, annotation_path, class_names, input_shape, 

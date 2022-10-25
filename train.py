@@ -19,7 +19,7 @@ from utils.utils_bbox import non_max_suppression
 
 
 class Trainer():
-    def __init__(self, cfg, fp16, distributed=False, Freeze_Train=True, gpu=0):
+    def __init__(self, cfg, pretrained, fp16, distributed=False, Freeze_Train=True, gpu=0):
         # 训练相关
         self.scaler    = None
         self.optimizer = None
@@ -27,6 +27,8 @@ class Trainer():
         self.gpu       = gpu
         self.fp16      = fp16
         self.distributed = distributed    # 多卡平行运行
+        self.pretrained = pretrained
+        self.input_shape = cfg.input_shape
         self.model_path  = cfg.model_path
 
         self.num_classes = cfg.num_classes
@@ -38,6 +40,22 @@ class Trainer():
         #                   默认先冻结主干训练后解冻训练。
         #------------------------------------------------------------------#
         self.Freeze_Train        = Freeze_Train
+
+        #------------------------------------------------------------------#
+        self.Init_Epoch          = cfg.Init_Epoch  
+        self.Freeze_Epoch        = cfg.Freeze_Epoch   
+        self.Freeze_batch_size   = cfg.Freeze_batch_size
+        #------------------------------------------------------------------#
+        #   解冻阶段训练参数
+        #   此时模型的主干不被冻结了，特征提取网络会发生改变
+        #   占用的显存较大，网络所有的参数都会发生改变
+        #   UnFreeze_Epoch          模型总共训练的epoch
+        #                           SGD需要更长的时间收敛，因此设置较大的UnFreeze_Epoch
+        #                           Adam可以使用相对较小的UnFreeze_Epoch
+        #   Unfreeze_batch_size     模型在解冻后的batch_size
+        #------------------------------------------------------------------#
+        self.UnFreeze_Epoch      = 300
+        self.Unfreeze_batch_size = 4
 
         #------------------------------------------------------#
         #   主干特征提取网络特征通用，冻结训练可以加快训练速度
@@ -56,39 +74,45 @@ class Trainer():
         self.batch_size = batch_size
         Init_lr_fit = min(max(batch_size / cfg.nbs * cfg.Init_lr, cfg.lr_limit_min), cfg.lr_limit_max)
 
+        self.eval_period = cfg.eval_period
+        self.save_period = cfg.save_period
+        self.save_logs = cfg.save_logs
+        self.save_weights = cfg.save_weights
+
         # setting
         self.train_data_loader = self.get_loader("train", batch_size, shuffle=True, num_workers=4)
         self.val_data_loader = self.get_loader("val", batch_size, shuffle=False, num_workers=4)
         self.set_device()
 
-        if cfg.verion == 'v3':
+        if cfg.version == 'v3':
             from yolov3.model import YoloBody
             from yolov3.loss import YoloLoss
-        elif cfg.verion == 'v4':
-            from yolov4.model import YoloBody
+        elif cfg.version == 'v4':
+            from yolov4.model import YoloBody, Decode
             from yolov4.loss import YoloLoss
 
-        self.model = YoloBody(cfg.anchors_mask, cfg.num_classes, cfg.backbone_path, cfg.pretrained, phase='train')
-        self.loss = YoloLoss(cfg.anchors, cfg.num_classes, cfg.input_shape, self.device, cfg.anchors_mask)
+        self.model = YoloBody(cfg.anchors, cfg.anchors_mask, cfg.num_classes, self.input_shape, cfg.backbone_path, self.pretrained, phase='train')
+        self.loss = YoloLoss(cfg.anchors, cfg.num_classes, self.input_shape, self.device, cfg.anchors_mask)
         self.set_model()
         self.scaler = torch.cuda.amp.GradScaler() if self.fp16 else None
         self.set_optimizer(Init_lr_fit)
         self.lr_scheduler = self.get_scheduler(batch_size)
-        self.history = History(cfg.save_logs, self.model, cfg.input_shape)
-        self.eval_callback = EvalCallback(cfg.save_logs, cfg.class_names, cfg.input_shape, cfg.iou_threshold)
+        self.history = History(cfg.save_logs, self.model, self.input_shape)
+        self.decode = Decode(cfg.anchors, cfg.num_classes, self.input_shape)
+        self.eval_callback = EvalCallback(cfg.save_logs, cfg.class_names, self.input_shape, cfg.iou_threshold)
 
 
     def train(self):
         #---------------------------------------#
         #   开始模型训练
         #---------------------------------------#
-        for epoch in range(cfg.Init_Epoch, cfg.UnFreeze_Epoch):
+        for epoch in range(self.Init_Epoch, self.UnFreeze_Epoch):
             #---------------------------------------#
             #   如果模型有冻结学习部分
             #   则解冻，并设置参数
             #---------------------------------------#
-            if epoch >= cfg.Freeze_Epoch and not self.UnFreeze_flag and self.Freeze_Train:
-                batch_size = cfg.Unfreeze_batch_size
+            if epoch >= self.Freeze_Epoch and not self.UnFreeze_flag and self.Freeze_Train:
+                batch_size = self.Unfreeze_batch_size
                 self.batch_size = batch_size
                 self.train_data_loader = self.get_loader("train", batch_size, shuffle=True, num_workers=4)
                 self.val_data_loader = self.get_loader("val", batch_size, shuffle=False, num_workers=4)
@@ -106,19 +130,19 @@ class Trainer():
                 self.sampler.set_epoch(epoch)
             
             set_optimizer_lr(self.optimizer, self.lr_scheduler, epoch)
-            print(f'Epoch {epoch + 1}/{cfg.UnFreeze_Epoch}:')
+            print(f'Epoch {epoch + 1}/{self.UnFreeze_Epoch}:')
 
-            eval_flag = True if epoch % cfg.eval_period == 0 and cfg.eval_flag else False
+            self.eval_flag = True if self.eval_period != 0 and (epoch + 1) % self.eval_period == 0 else False
 
             train_loss = self.train_one_epoch()
-            val_loss = self.val_one_epoch(eval_flag)
+            val_loss = self.val_one_epoch()
             if self.local_rank == 0:
                 self.history.append_loss(epoch + 1, train_loss, val_loss)
 
-                print('Epoch:'+ str(epoch + 1) + '/' + str(cfg.UnFreeze_Epoch))
+                print('Epoch:'+ str(epoch + 1) + '/' + str(self.UnFreeze_Epoch))
                 print('Total Loss: %.3f || Val Loss: %.3f ' % (train_loss, val_loss))
                 
-                if eval_flag:
+                if self.eval_flag:
                     evaluation_metrics = self.eval_callback.get_metrics()
                     print(' || '.join([k+': %.3f' % v for k, v in evaluation_metrics.items()]))
 
@@ -128,12 +152,12 @@ class Trainer():
                 #-----------------------------------------------#
                 #   保存权值
                 #-----------------------------------------------#
-                if (epoch + 1) % cfg.save_period == 0 or epoch + 1 == cfg.UnFreeze_Epoch:
-                    self.save_model(os.path.join(cfg.save_logs, "weights", "ep%03d-loss%.3f-val_loss%.3f.pth" % (epoch + 1, train_loss, val_loss)))
+                if (epoch + 1) % self.save_period == 0 or epoch + 1 == self.UnFreeze_Epoch:
+                    self.save_model(os.path.join(self.save_logs, "weights", "ep%03d-loss%.3f-val_loss%.3f.pth" % (epoch + 1, train_loss, val_loss)))
 
-                if len(self.loss_history.val_loss) <= 1 or (val_loss) <= min(self.loss_history.val_loss):
+                if len(self.history.val_loss) <= 1 or (val_loss) <= min(self.history.val_loss):
                     print('Save best model to best_epoch_weights.pth')
-                    self.save_model(os.path.join(cfg.save_weights, "best_epoch_weights.pth"))
+                    self.save_model(os.path.join(self.save_weights, "best_epoch_weights.pth"))
                     
 
 
@@ -175,7 +199,7 @@ class Trainer():
             if phase == 'train':
                 self.num_train = len(annotation_lines)
 
-        dataset = YoloDataset(annotation_lines, cfg.input_shape, transform=DataTransform(), phase=phase)
+        dataset = YoloDataset(annotation_lines, self.input_shape, transform=DataTransform(), phase=phase)
         if self.distributed:
             ngpus_per_node  = torch.cuda.device_count()
             self.sampler = DistributedSampler(dataset, shuffle=shuffle,)
@@ -226,7 +250,7 @@ class Trainer():
         #------------------------------------------------------#
         #   创建yolo模型
         #------------------------------------------------------#
-        if not self.model.pretrained:
+        if not self.pretrained:
             weights_init(self.model)
         else:
             if self.model_path != '':
@@ -303,7 +327,7 @@ class Trainer():
 
         loss = 0
         self.model.train()
-        for batch_i, (images, targets) in enumerate(pbar):
+        for batch_i, (images, targets, _) in enumerate(pbar):
             images = images.to(self.device)
             targets = targets.to(self.device)
 
@@ -341,9 +365,9 @@ class Trainer():
                                     'lr'     : get_optimizer_lr(self.optimizer)})
 
         # print('Finish Train')
-            return loss / epoch_step
+        return loss / epoch_step
        
-    def val_one_epoch(self, eval_flag=False):
+    def val_one_epoch(self):
         t0 = time.time()
         print('Start Validation')
         epoch_step = len(self.val_data_loader)
@@ -364,26 +388,24 @@ class Trainer():
             
             # forward
             with torch.no_grad():
-                if eval_flag:
-                    self.model.phase = "inference"
-                    ps, outs = self.model(images)
+                #----------------------#
+                #   前向传播
+                #----------------------#
+                ps = self.model(images)
+                #----------------------#
+                #   计算损失
+                #----------------------#
+                loss_value = self.loss(ps, targets)
+
+                if self.eval_flag:
+                    outs = self.decode(ps)
                     #---------------------------------------------------------#
                     #   将预测框进行堆叠，然后进行非极大抑制
                     #---------------------------------------------------------#
                     results = non_max_suppression(torch.cat(outs, 1), self.num_classes, 
                                                   conf_thres=self.confidence, nms_thres=self.nms_iou)
                     self.eval_callback.update_batch_statistics(results, targets)
-                else:
-                    #----------------------#
-                    #   前向传播
-                    #----------------------#
-                    ps = self.model(images)
-
-                #----------------------#
-                #   计算损失
-                #----------------------#
-                loss_value = self.loss(ps, targets)
-
+                    
             val_loss += loss_value.item()
 
             time_span = time.time() - t0
@@ -402,9 +424,9 @@ class Trainer():
 
 
 if __name__ == "__main__":
-    cfg = YoloConfig(version='v4')
+    config = YoloConfig(version='v4')
 
-    YOLO_trainer = Trainer(cfg, fp16=True, distributed=False, Freeze_Train=True)
+    YOLO_trainer = Trainer(config, pretrained=True, fp16=True, distributed=False, Freeze_Train=True)
     print("[%s] Start train ..." % (time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())))
 
     YOLO_trainer.train()

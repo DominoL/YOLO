@@ -2,7 +2,7 @@ from collections import OrderedDict
 
 import torch
 import torch.nn as nn
-from CSPdarknet import CSPdarknet53
+from .CSPdarknet import CSPdarknet53
 from torch.autograd import Function
 
 
@@ -96,7 +96,7 @@ def yolo_head(filters_list, in_filters):
 #   yolo_body
 #---------------------------------------------------#
 class YoloBody(nn.Module):
-    def __init__(self, anchors_mask, num_classes, backbone_path, pretrained=True, phase='inference'):
+    def __init__(self, anchors, anchors_mask, num_classes, input_shape, backbone_path, pretrained=True, phase='inference'):
         super(YoloBody, self).__init__()
         #---------------------------------------------------#   
         #   生成CSPdarknet53的主干模型
@@ -105,8 +105,7 @@ class YoloBody(nn.Module):
         #   26,26,512
         #   13,13,1024
         #---------------------------------------------------#
-        self.pretrained = pretrained
-        self.backbone = CSPdarknet53(self.pretrained, backbone_path)
+        self.backbone = CSPdarknet53(pretrained, backbone_path)
 
         self.conv_set1 = make_three_conv([512, 1024], 1024)
         self.SPP = SpatialPyramidPooling()
@@ -134,7 +133,8 @@ class YoloBody(nn.Module):
 
         self.phase = phase  # 指定是train 还是inference
         # 推测时使用Detect类
-        self.decode = Decode()
+        if self.phase == "inference":  #推测模式
+            self.decode = Decode(anchors, num_classes, input_shape)
 
     def forward(self, x):
         # backbone
@@ -198,7 +198,7 @@ class YoloBody(nn.Module):
 
         if self.phase == "inference":  #推测模式
             # 执行Detect类的forward
-            return (out0, out1, out2), self.decode.forward([out0, out1, out2])
+            return self.decode.forward([out0, out1, out2])
         else: # 学习模式
             return out0, out1, out2
 

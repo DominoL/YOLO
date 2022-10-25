@@ -118,7 +118,7 @@ class YoloLoss():
             #-------------------------------------------------#
             #   此时获得的scaled_anchors大小是相对于特征层的
             #-------------------------------------------------#
-            anchors = torch.tensor([[a_w / stride_w, a_h / stride_h] for a_w, a_h in self.anchors[self.anchors_mask[l]]])
+            anchors = torch.tensor([[a_w / stride_w, a_h / stride_h] for a_w, a_h in self.anchors[self.anchors_mask[l]]]).to(self.device)
 
             t_cls, t_box, indices, anchor = self.targets_match(p, anchors, targets)
 
@@ -154,7 +154,7 @@ class YoloLoss():
                     iou = (1.0 - self.gr) + self.gr * iou
                 t_obj[b, a, gj, gi] = iou  # iou ratio
 
-            obj_loss += self.balance[l] * self.BCEobj(pb[..., 4], t_obj)  # obj loss
+            obj_loss += self.balance[l] * self.BCEobj(p[..., 4], t_obj)  # obj loss
 
         loss = sum([self.box_ratio * box_loss, 
                     self.obj_ratio * obj_loss,
@@ -174,7 +174,7 @@ class YoloLoss():
         gain = torch.ones(6, device=targets.device).long()
         # gain[2:6] = torch.tensor(p.shape)[[3, 2, 3, 2]]  # xyxy gain
         gain[2:6] = torch.tensor([in_w, in_h, in_w, in_h])  # xyxy gain
-
+        
         num_a = anchors.shape[0]  # 特征层上anchor的数量
         num_t = targets.shape[0]  # gt的数量
         # [3] -> [3, 1] -> [3, num_t]

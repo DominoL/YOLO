@@ -20,8 +20,8 @@ class YoloDataset(Dataset):
         self.phase = phase  #指定train或val
 
         self.multiscale = multiscale
-        self.min_size = input_shape - 3 * 32
-        self.max_size = input_shape + 3 * 32
+        self.min_size = input_shape[0] - 3 * 32
+        self.max_size = input_shape[0] + 3 * 32
         self.batch_count = 0
 
     def __len__(self):
@@ -30,14 +30,14 @@ class YoloDataset(Dataset):
     def __getitem__(self, index):
         index = index % self.length
         image, boxes, img_path = self.load_data(index)
-        image, boxes = self.letterBox(self, image, boxes)
+        image, boxes = self.letterBox(image, boxes)
         # 数据增强
         image, boxes = self.random_aug_data(image,
                                             boxes,
                                             self.input_shape[0:2],
                                             phase=self.phase)
-        image = np.transpose(
-            preprocess_input(np.array(image, dtype=np.float32)), (2, 0, 1))
+                                            
+        image = np.transpose(preprocess_input(np.array(image, dtype=np.float32)), (2, 0, 1))
         boxes = np.array(boxes, dtype=np.float32)
         # 将box信息转换到yolo格式
         label = None
@@ -87,7 +87,7 @@ class YoloDataset(Dataset):
         image = image.resize((nw, nh), Image.BICUBIC)
         new_img = Image.new('RGB', (w, h), (128, 128, 128))
         new_img.paste(image, (dx, dy))
-        image = np.array(new_img, np.float32)
+        image = new_img
 
         #---------------------------------#
         #   对真实框进行调整
@@ -130,7 +130,9 @@ class YoloDataset(Dataset):
 
         # Selects new input_shape every tenth batch
         if self.multiscale and self.batch_count % 10 == 0:
-            self.input_shape = np.random.choice(range(self.min_size, self.max_size + 1, 32))
+            new_input_shape = np.random.choice(range(self.min_size[0], self.max_size[0] + 1, 32))
+            self.input_shape[0] = new_input_shape
+            self.input_shape[1] = new_input_shape
         self.batch_count += 1
 
         images = torch.from_numpy(np.array(images)).type(torch.FloatTensor)

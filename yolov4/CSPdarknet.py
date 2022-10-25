@@ -61,7 +61,7 @@ class Resblock(nn.Module):
 #--------------------------------------------------------------------#
 class Resblock_body(nn.Module):
     def __init__(self, in_channels, out_channels, num_blocks, first):
-        super(Resblock, self).__init__()
+        super(Resblock_body, self).__init__()
         #----------------------------------------------------------------#
         #   利用一个步长为2x2的卷积块进行高和宽的压缩
         #----------------------------------------------------------------#
@@ -87,7 +87,7 @@ class Resblock_body(nn.Module):
             #--------------------------------------------------------------------------#
             #   然后建立一个大的残差边self.split_conv0、这个大残差边绕过了很多的残差结构
             #--------------------------------------------------------------------------#
-            self.split_conv0 = BasicConv(in_channels, out_channels//2, kernel_size=1, stride=1)
+            self.split_conv0 = BasicConv(out_channels, out_channels//2, kernel_size=1, stride=1)
 
             #----------------------------------------------------------------#
             #   主干部分会对num_blocks进行循环，循环内部是残差结构。
